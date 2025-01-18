@@ -12,8 +12,8 @@ typedef enum {
 } Command;
 
 typedef struct {
-    Command command;    // The parsed command
-    const char *arg;    // Optional argument (e.g., package name for install/uninstall)
+    Command command;    
+    const char *arg;    
 } ParsedCommand;
 
 
