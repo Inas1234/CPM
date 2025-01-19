@@ -36,7 +36,6 @@ char *parse_package_dependencies(const char *json) {
 
     cJSON *dependencies = cJSON_GetObjectItemCaseSensitive(root, "dependencies");
     if (!cJSON_IsObject(dependencies)) {
-        fprintf(stderr, "No dependencies found.\n");
         cJSON_Delete(root);
         return strdup("{}");
     }

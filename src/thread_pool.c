@@ -32,7 +32,6 @@ static void *thread_worker(void *arg) {
 
         pthread_mutex_lock(&pool.lock);
         pool.active_tasks--;
-        printf("[DEBUG] Task completed. Active tasks: %d\n", pool.active_tasks);
         if (pool.active_tasks == 0 && !pool.task_queue_head) {
             pthread_cond_signal(&pool.all_done);
         }

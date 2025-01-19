@@ -3,6 +3,7 @@
 #include "json_parser.h"
 #include "downloader.h"
 #include "thread_pool.h"
+#include "logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +53,8 @@ int load_package_lock(void) {
     free(buffer);
 
     if (!lock_file_root) {
-        fprintf(stderr, "Error parsing package-lock.json.\n");
+        // fprintf(stderr, "Error parsing package-lock.json.\n");
+        log_message(LOG_LEVEL_ERROR, "Error parsing package-lock.json");
         return 1;
     }
 
@@ -67,7 +69,8 @@ int save_package_lock(void) {
 
     FILE *file = fopen(LOCK_FILE, "w");
     if (!file) {
-        fprintf(stderr, "Failed to open package-lock.json for writing.\n");
+        // fprintf(stderr, "Failed to open package-lock.json for writing.\n");
+        log_message(LOG_LEVEL_ERROR, "Failed to open package-lock.json for writing");
         free(json_string);
         return 1;
     }
@@ -125,18 +128,20 @@ int install_package(const char *package_name) {
 
     HttpResponse response;
     if (http_get(url, &response) != 0) {
-        fprintf(stderr, "Failed to fetch package metadata from %s\n", url);
+        // fprintf(stderr, "Failed to fetch package metadata from %s\n", url);
+        log_message(LOG_LEVEL_ERROR, "Failed to fetch package metadata from %s", url);
         return 1;
     }
 
     char *name = NULL, *version = NULL;
     if (!parse_package_metadata(response.data, &name, &version)) {
-        fprintf(stderr, "Failed to parse package metadata.\n");
+        // fprintf(stderr, "Failed to parse package metadata.\n");
+        log_message(LOG_LEVEL_ERROR, "Failed to parse package metadata");
         free_http_response(&response);
         return 1;
     }
 
-    printf("Installing package: %s@%s\n", name, version);
+    log_message(LOG_LEVEL_INFO, "Installing package: %s@%s", name, version);
 
     char tarball_url[1024];
     snprintf(tarball_url, sizeof(tarball_url),
@@ -150,7 +155,8 @@ int install_package(const char *package_name) {
     ensure_directory_exists(NODE_MODULES_DIR);
 
     if (!download_file(tarball_url, tarball_path)) {
-        fprintf(stderr, "Failed to download package tarball: %s\n", tarball_url);
+        // fprintf(stderr, "Failed to download package tarball: %s\n", tarball_url);
+        log_message(LOG_LEVEL_ERROR, "Failed to download package tarball: %s", tarball_url);
         free(name);
         free(version);
         free_http_response(&response);
@@ -158,7 +164,8 @@ int install_package(const char *package_name) {
     }
 
     if (!extract_tarball(tarball_path, extract_dir)) {
-        fprintf(stderr, "Failed to extract package: %s\n", tarball_path);
+        // fprintf(stderr, "Failed to extract package: %s\n", tarball_path);
+        log_message(LOG_LEVEL_ERROR, "Failed to extract package: %s", tarball_path);
         free(name);
         free(version);
         free_http_response(&response);
@@ -166,7 +173,8 @@ int install_package(const char *package_name) {
     }
 
     if (!delete_archive(tarball_path)) {
-        fprintf(stderr, "Failed to delete archive: %s\n", tarball_path);
+        // fprintf(stderr, "Failed to delete archive: %s\n", tarball_path);
+        log_message(LOG_LEVEL_ERROR, "Failed to delete archive: %s", tarball_path);
         free(name);
         free(version);
         free_http_response(&response);
@@ -176,14 +184,16 @@ int install_package(const char *package_name) {
     char *dependencies = parse_package_dependencies(response.data);
     cJSON *dependencies_json = cJSON_Parse(dependencies);
     if (dependencies_json) {
-        printf("Installing dependencies for %s@%s:\n", name, version);
+        // printf("Installing dependencies for %s@%s:\n", name, version);
+        log_message(LOG_LEVEL_INFO, "Installing dependencies for %s@%s", name, version);
+
         update_lock_file_safe(name, version, dependencies_json);
 
         cJSON *dep;
         cJSON_ArrayForEach(dep, dependencies_json) {
             const char *dep_name = dep->string;
             if (dep_name) {
-                printf("Queueing dependency: %s\n", dep_name);
+                // printf("Queueing dependency: %s\n", dep_name);
                 thread_pool_add_task(install_dependency_task, strdup(dep_name));
             }
         }
@@ -194,7 +204,8 @@ int install_package(const char *package_name) {
         free(dependencies);
 
     } else {
-        printf("No dependencies found for %s@%s.\n", name, version);
+        // printf("No dependencies found for %s@%s.\n", name, version);
+        log_message(LOG_LEVEL_INFO, "No dependencies found for %s@%s", name, version);
         update_lock_file_safe(name, version, NULL);
 
         // pthread_mutex_lock(&pool.lock);
@@ -208,7 +219,8 @@ int install_package(const char *package_name) {
 
     save_package_lock_safe();
 
-    printf("Package %s@%s installed successfully.\n", name, version);
+    // printf("Package %s@%s installed successfully.\n", name, version);
+    log_message(LOG_LEVEL_INFO, "Package %s@%s installed successfully", name, version);
 
     free(name);
     free(version);
@@ -219,13 +231,15 @@ int install_package(const char *package_name) {
 int uninstall_package(const char *package_name) {
     cJSON *dependencies_root = cJSON_GetObjectItemCaseSensitive(lock_file_root, "dependencies");
     if (!dependencies_root) {
-        fprintf(stderr, "No installed packages found.\n");
+        // fprintf(stderr, "No installed packages found.\n");
+        log_message(LOG_LEVEL_ERROR, "No installed packages found");
         return 1;
     }
 
     cJSON *package_entry = cJSON_GetObjectItemCaseSensitive(dependencies_root, package_name);
     if (!package_entry) {
-        fprintf(stderr, "Package %s is not installed.\n", package_name);
+        // fprintf(stderr, "Package %s is not installed.\n", package_name);
+        log_message(LOG_LEVEL_ERROR, "Package %s is not installed", package_name);
         return 1;
     }
 
@@ -246,22 +260,26 @@ int uninstall_package(const char *package_name) {
     cJSON_DeleteItemFromObject(dependencies_root, package_name);
     save_package_lock_safe();
 
-    printf("Package %s uninstalled successfully.\n", package_name);
+    // printf("Package %s uninstalled successfully.\n", package_name);
+    log_message(LOG_LEVEL_INFO, "Package %s uninstalled successfully", package_name);
     return 0;
 }
 
 int list_installed_packages(void) {
     DIR *dir = opendir(NODE_MODULES_DIR);
     if (!dir) {
-        fprintf(stderr, "No packages installed.\n");
+        // fprintf(stderr, "No packages installed.\n");
+        log_message(LOG_LEVEL_ERROR, "No packages installed");
         return 1;
     }
 
     struct dirent *entry;
-    printf("Installed packages:\n");
+    // printf("Installed packages:\n");
+    log_message(LOG_LEVEL_INFO, "Installed packages");
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-            printf("- %s\n", entry->d_name);
+            // printf("- %s\n", entry->d_name);
+            log_message(LOG_LEVEL_INFO, "- %s", entry->d_name);
         }
     }
 
