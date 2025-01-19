@@ -28,6 +28,14 @@ bool download_file(const char *url, const char *output_path) {
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_file_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);      
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L); 
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 102400L); 
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(curl, CURLOPT_FORBID_REUSE, 0L);
+
+
 
     CURLcode res = curl_easy_perform(curl);
     fclose(file);

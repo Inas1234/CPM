@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "parser.h"
 #include "network.h"
 #include "json_parser.h"
@@ -12,7 +13,8 @@ int main(int argc, char *argv[]) {
 
     logger_init(1);
 
-    if (!thread_pool_init(8)) {
+    int num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+    if (!thread_pool_init(num_threads)) {
         fprintf(stderr, "Failed to initialize thread pool.\n");
         return 1;
     }
