@@ -2,6 +2,7 @@
 #include "network.h"
 #include "json_parser.h"
 #include "downloader.h"
+#include "thread_pool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,11 +10,26 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cjson/cJSON.h>
+#include <pthread.h>
 
 #define NODE_MODULES_DIR "./node_modules"
 #define LOCK_FILE "./package-lock.json"
 
 static cJSON *lock_file_root = NULL;
+static pthread_mutex_t lock_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void update_lock_file_safe(const char *package_name, const char *version, cJSON *dependencies) {
+    pthread_mutex_lock(&lock_file_mutex);
+    update_lock_file(package_name, version, dependencies);
+    pthread_mutex_unlock(&lock_file_mutex);
+}
+
+int save_package_lock_safe(void) {
+    pthread_mutex_lock(&lock_file_mutex);
+    int result = save_package_lock();
+    pthread_mutex_unlock(&lock_file_mutex);
+    return result;
+}
 
 int load_package_lock(void) {
     FILE *file = fopen(LOCK_FILE, "r");
@@ -80,11 +96,27 @@ void update_lock_file(const char *package_name, const char *version, cJSON *depe
     cJSON_AddItemToObject(dependencies_root, package_name, package_entry);
 }
 
-
 void ensure_directory_exists(const char *path) {
     char command[1024];
     snprintf(command, sizeof(command), "mkdir -p %s", path);
     system(command);
+}
+
+void install_dependency_task(void *arg) {
+    const char *dependency_name = (const char *)arg;
+
+    install_package(dependency_name);
+
+    pthread_mutex_lock(&pool.lock);
+
+    // // pool.active_tasks--;
+    // if (pool.active_tasks == 0 && !pool.task_queue_head) {
+    //     pthread_cond_signal(&pool.all_done);
+    // }
+
+    // pthread_mutex_unlock(&pool.lock);
+
+    free((void *)dependency_name);
 }
 
 int install_package(const char *package_name) {
@@ -140,31 +172,41 @@ int install_package(const char *package_name) {
         free_http_response(&response);
         return 1;
     }
-    
 
     char *dependencies = parse_package_dependencies(response.data);
     cJSON *dependencies_json = cJSON_Parse(dependencies);
-    if (dependencies) {
+    if (dependencies_json) {
         printf("Installing dependencies for %s@%s:\n", name, version);
-        update_lock_file(name, version, dependencies_json);
-        cJSON_Delete(dependencies_json);
-        cJSON *deps_json = cJSON_Parse(dependencies);
-        if (deps_json && cJSON_IsObject(deps_json)) {
-            cJSON *dep;
-            cJSON_ArrayForEach(dep, deps_json) {
-                const char *dep_name = dep->string;
-                const char *dep_version = cJSON_GetStringValue(dep);
-                if (dep_name && dep_version) {
-                    printf("  - %s@%s\n", dep_name, dep_version);
-                    install_package(dep_name); 
-                }
+        update_lock_file_safe(name, version, dependencies_json);
+
+        cJSON *dep;
+        cJSON_ArrayForEach(dep, dependencies_json) {
+            const char *dep_name = dep->string;
+            if (dep_name) {
+                printf("Queueing dependency: %s\n", dep_name);
+                thread_pool_add_task(install_dependency_task, strdup(dep_name));
             }
         }
-        cJSON_Delete(deps_json);
+
+        // thread_pool_wait(); // Wait for all tasks to complete
+
+        cJSON_Delete(dependencies_json);
         free(dependencies);
+
+    } else {
+        printf("No dependencies found for %s@%s.\n", name, version);
+        update_lock_file_safe(name, version, NULL);
+
+        // pthread_mutex_lock(&pool.lock);
+        // pool.active_tasks--; // Decrement active tasks for tasks with no dependencies
+        // if (pool.active_tasks == 0 && !pool.task_queue_head) {
+        //     pthread_cond_signal(&pool.all_done);
+        //     printf("[DEBUG] No dependencies. Signaling main thread.\n");
+        // }
+        // pthread_mutex_unlock(&pool.lock);
     }
 
-    save_package_lock();
+    save_package_lock_safe();
 
     printf("Package %s@%s installed successfully.\n", name, version);
 
@@ -173,7 +215,6 @@ int install_package(const char *package_name) {
     free_http_response(&response);
     return 0;
 }
-
 
 int uninstall_package(const char *package_name) {
     cJSON *dependencies_root = cJSON_GetObjectItemCaseSensitive(lock_file_root, "dependencies");
@@ -203,7 +244,7 @@ int uninstall_package(const char *package_name) {
     system(command);
 
     cJSON_DeleteItemFromObject(dependencies_root, package_name);
-    save_package_lock();
+    save_package_lock_safe();
 
     printf("Package %s uninstalled successfully.\n", package_name);
     return 0;
